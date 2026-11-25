@@ -122,6 +122,7 @@ Novelcarft-th/
 ## สารบัญเอกสาร (Documentation Index)
 
 - [คู่มือ Build แอป Android & รัน Local AI (Gemma 4)](./docs/ANDROID_NPU_SETUP.md)
+- [คู่มือการเทรน (Fine-Tuning) AI เฉพาะทางสำหรับ PlotCraft TH](./docs/FINE_TUNING_GUIDE.md)
 - [สเปกผลิตภัณฑ์ (Product Specification)](./docs/PRODUCT_SPEC.md)
 - [สถาปัตยกรรมระบบและโครงสร้างข้อมูล (Architecture & Schema)](./docs/ARCHITECTURE.md)
 - [กฎเหล็กของ AI และ Prompt Engineering (AI Prompt Rules)](./docs/AI_PROMPT_RULES.md)
