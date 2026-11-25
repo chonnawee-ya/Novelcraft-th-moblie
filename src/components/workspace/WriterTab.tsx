@@ -141,13 +141,18 @@ export function WriterTab() {
       return;
     }
 
+    const isOnDevice = aiSettings.provider === 'on-device';
+    const targetIndices = isOnDevice ? unwrittenIndices.slice(0, 2) : unwrittenIndices;
+
     const controller = startGeneration(
-      `Auto-Pilot: เริ่มแต่งต่อเนื่องอัตโนมัติ ${unwrittenIndices.length} ตอน...`
+      isOnDevice
+        ? `On-Device NPU: เริ่มแต่ง ${targetIndices.length} ตอน (จำกัดชุดละ 2 ตอนเพื่อคุมความร้อนมือถือ)...`
+        : `Auto-Pilot: เริ่มแต่งต่อเนื่องอัตโนมัติ ${targetIndices.length} ตอน...`
     );
 
     let completed = 0;
     try {
-      for (const idx of unwrittenIndices) {
+      for (const idx of targetIndices) {
         if (controller.signal.aborted) break;
         const latestProject = useAppStore.getState().activeProject;
         if (!latestProject) break;
@@ -155,7 +160,7 @@ export function WriterTab() {
         const ch = latestProject.chapters[idx];
         setSelectedIdx(idx);
         updateGenerationLabel(
-          `Auto-Pilot (${completed + 1}/${unwrittenIndices.length}): กำลังแต่งตอนที่ ${ch.chapterNumber} "${ch.title}"...`
+          `Auto-Pilot (${completed + 1}/${targetIndices.length}): กำลังแต่งตอนที่ ${ch.chapterNumber} "${ch.title}"...`
         );
 
         const prose = await writeChapterProse({
@@ -175,6 +180,12 @@ export function WriterTab() {
           return p;
         });
         completed++;
+
+        // Thermal cooldown between chapters on mobile NPU
+        if (isOnDevice && completed < targetIndices.length && !controller.signal.aborted) {
+          updateGenerationLabel('กำลังพัก NPU 2.5 วินาทีเพื่อคุมอุณหภูมิเครื่อง...');
+          await new Promise((r) => setTimeout(r, 2500));
+        }
       }
 
       if (completed > 0) {

@@ -171,7 +171,7 @@ export const ContinuityReportSchema = z.object({
 
 export type ContinuityReport = z.infer<typeof ContinuityReportSchema>;
 
-export type AIProviderType = 'gemini' | 'openai-compatible' | 'anthropic';
+export type AIProviderType = 'gemini' | 'openai-compatible' | 'anthropic' | 'on-device';
 
 export interface AISettings {
   provider: AIProviderType;

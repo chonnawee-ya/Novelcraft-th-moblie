@@ -23,3 +23,12 @@ pnpm-debug.log*
 .idea
 .DS_Store
 Thumbs.db
+
+# Android / Capacitor build artifacts
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/public/
+*.apk
+*.aab

@@ -1,3 +1,6 @@
+import { Capacitor } from '@capacitor/core';
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import { NovelProjectSchema, SCHEMA_VERSION, type NovelProject } from '../types/novel';
 
 function sanitizeFilename(name: string): string {
@@ -11,6 +14,27 @@ function sanitizeFilename(name: string): string {
 }
 
 function triggerDownload(content: string, filename: string, mimeType: string) {
+  if (Capacitor.isNativePlatform()) {
+    void (async () => {
+      try {
+        const saved = await Filesystem.writeFile({
+          path: filename,
+          data: content,
+          directory: Directory.Cache,
+          encoding: Encoding.UTF8,
+        });
+        await Share.share({
+          title: filename,
+          url: saved.uri,
+          dialogTitle: `ส่งออกไฟล์ ${filename}`,
+        });
+      } catch (err) {
+        console.error('Native export failed:', err);
+      }
+    })();
+    return;
+  }
+
   const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

@@ -4,6 +4,27 @@
 
 ---
 
+## [4.0.0] — Android Mobile App & On-Device Local AI (LiteRT-LM)
+### Added
+- **Android Mobile Wrapper (Capacitor 8):** แปลงโปรเจกต์เป็นแอป Android (`th.plotcraft.novelstudio`) รองรับ Safe Area, `CapacitorHttp` (ไม่ติด CORS), และแชร์/บันทึกไฟล์ผ่าน `@capacitor/filesystem` + `@capacitor/share`
+- **On-Device Local AI (`com.google.ai.edge.litertlm:litertlm-android:0.20.0`):**
+  - สร้าง `OnDeviceLLMPlugin.java` + `LiteRtLmBridge.kt` (Kotlin `2.4.21`) รองรับการรันไฟล์ `.litertlm` / `.task` ออฟไลน์บนมือถือ พร้อม Fallback อัตโนมัติ `NPU → GPU → CPU`
+  - เพิ่มหน้า **Local AI Model Manager (`OnDeviceModelManager.tsx`)** รองรับการ **นำเข้าไฟล์จากเครื่องมือถือ (Android File Picker)**, **ดาวน์โหลดจาก URL ใดก็ได้** (พร้อม HTTP Range Resume และปุ่มลัดลิงก์ Hugging Face), สแกนไฟล์ในเครื่องอัตโนมัติ และสวิตช์เลือก Backend (`NPU→GPU` / `GPU` / `CPU`)
+  - ตรวจจับฮาร์ดแวร์ Snapdragon (`SM8850`), RAM, พื้นที่ว่าง, อุณหภูมิเครื่อง (Thermal Guard) และคืนหน่วยความจำอัตโนมัติใน `MainActivity.onTrimMemory()`
+- **Gemma 4 Mobile JSON & Speed Tuning:**
+  - ปิด Thinking Mode (`ThinkingConfig(enableThinking = false)`) เพื่อลดเวลาตอบและความร้อนบนมือถือ
+  - เปิด Native JSON Constrained Decoding (`ResponseFormat.json`) + ดึงข้อความจาก `Content.Text.text` โดยตรง + ขยาย Context เป็น `6,144` tokens
+  - ปิด Auto-Retry วนซ้ำในโหมด On-Device (`maxRetries = 0`), เพิ่ม `repairTruncatedJson()` ซ่อม JSON ที่ถูกตัดจบ และเพิ่ม Compact Prompt
+  - จำกัด Auto-Write Batch บนโหมด Local AI เป็นชุดละไม่เกิน 2 ตอนพร้อมพักเครื่อง 2.5 วินาที
+
+### Changed / Removed (Mobile Cleanup)
+- ตัดส่วนที่เฉพาะเว็บ/เดสก์ท็อปออก: ลบ `api/cors-proxy.ts`, `vercel.json`, middleware CORS Proxy ใน `vite.config.ts` และ Checkbox CORS Proxy ใน `ApiKeyModal.tsx`
+- ปรับรายการ AI Provider ให้กระชับสำหรับมือถือ เหลือ 4 ตัวเลือกหลัก: **Local AI (.litertlm ออฟไลน์)**, **OpenRouter**, **Google Gemini API** และ **Custom OpenAI API**
+- ซ่อนช่อง `Fast Model` อัตโนมัติเมื่อเลือกโหมด Local AI เพื่อลดการ Unload/Reload โมเดลขนาดใหญ่
+- ปรับเมนู Export ให้กระชับ คง **โครงเรื่อง Markdown (`.md`)** (สำหรับส่งให้ AI ภายนอก), **ต้นฉบับ (`.md` / `.txt`)** และ **Backup (`.json`)**
+
+---
+
 ## [3.1.0] — Token Optimization Suite
 ### Added
 - **Smart Context Pruning:** เพิ่ม Beat Windowing (ส่งเฉพาะ 3 จังหวะที่เกี่ยวข้อง) และ Character Relevance Filter (ส่งโปรไฟล์เต็มเฉพาะตัวเอกและตัวละครที่ปรากฏในตอน)

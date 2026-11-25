@@ -1,6 +1,12 @@
+import { Capacitor } from '@capacitor/core';
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory, Type, type Schema } from '@google/genai';
 import { GENRES, STORY_STRUCTURES, getStructureById } from '../data/knowledgeBase';
 import { getPresetById } from '../data/aiProviders';
+import {
+  generateWithOnDeviceLLM,
+  loadOnDeviceModel,
+  scanInstalledOnDeviceModels,
+} from './onDeviceLlm';
 import {
   AutoDirectorPlanSchema,
   ChapterBatchResponseSchema,
@@ -100,20 +106,63 @@ function classifyError(err: unknown): AIServiceError {
   return new AIServiceError(msg || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุจาก AI API', 'UNKNOWN');
 }
 
+function repairTruncatedJson(text: string): string {
+  let s = text.trim();
+  // Remove trailing incomplete key/comma patterns before closing
+  s = s.replace(/,\s*$/, '');
+
+  // Track open braces/brackets outside of string literals
+  let inString = false;
+  let escaped = false;
+  const stack: string[] = [];
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && inString) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (ch === '{') stack.push('}');
+      else if (ch === '[') stack.push(']');
+      else if (ch === '}' || ch === ']') stack.pop();
+    }
+  }
+
+  if (inString) s += '"';
+  s = s.replace(/,\s*$/, '');
+  while (stack.length > 0) {
+    s += stack.pop();
+  }
+  return s;
+}
+
 function extractJsonText(raw: string): string {
   const trimmed = raw.trim();
   // Strip ```json ... ``` fences if model wrapped it
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenceMatch && fenceMatch[1]) {
-    return fenceMatch[1].trim();
+  const candidate = fenceMatch && fenceMatch[1] ? fenceMatch[1].trim() : trimmed;
+
+  const firstBrace = candidate.indexOf('{');
+  if (firstBrace === -1) return candidate;
+
+  const lastBrace = candidate.lastIndexOf('}');
+  const slice = lastBrace > firstBrace ? candidate.slice(firstBrace, lastBrace + 1) : candidate.slice(firstBrace);
+
+  try {
+    JSON.parse(slice);
+    return slice;
+  } catch {
+    return repairTruncatedJson(slice);
   }
-  // Find outermost JSON object
-  const firstBrace = trimmed.indexOf('{');
-  const lastBrace = trimmed.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1);
-  }
-  return trimmed;
 }
 
 function normalizeBaseUrl(url: string): string {
@@ -132,7 +181,8 @@ async function apiFetch(
   init: RequestInit,
   useCorsProxy?: boolean
 ): Promise<Response> {
-  if (!useCorsProxy) {
+  // On native Android/iOS, CapacitorHttp bypasses CORS directly—never hit /api/cors-proxy
+  if (!useCorsProxy || Capacitor.isNativePlatform()) {
     return fetch(targetUrl, init);
   }
   const headers = new Headers(init.headers);
@@ -151,7 +201,7 @@ function validateConfig(apiKey: string, settings: AISettings) {
   if (!settings.model.trim()) {
     throw new AIServiceError('กรุณาระบุชื่อโมเดล (Model ID) ในหน้าตั้งค่า AI', 'AUTH');
   }
-  if (settings.provider !== 'gemini' && !settings.baseUrl.trim()) {
+  if (settings.provider !== 'gemini' && settings.provider !== 'on-device' && !settings.baseUrl.trim()) {
     throw new AIServiceError('กรุณาระบุ Base URL ในหน้าตั้งค่า AI', 'AUTH');
   }
 }
@@ -320,6 +370,43 @@ async function callAnthropicProvider(params: {
   return textBlock.text;
 }
 
+async function callOnDeviceProvider(params: {
+  settings: AISettings;
+  systemInstruction: string;
+  prompt: string;
+  jsonContract?: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { settings, systemInstruction, prompt, jsonContract, signal } = params;
+  const compactHint = jsonContract
+    ? '\n\n[ON-DEVICE COMPACT MODE: เขียนให้กระชับสุดๆ ข้อละ 1 ประโยคสั้น เพื่อให้จบภายในขีดจำกัดหน่วยความจำ ตอบเป็น JSON Object เท่านั้น ห้ามมีข้อความอื่น]:\n' +
+      jsonContract
+    : '';
+  const fullPrompt = `${prompt}${compactHint}`;
+
+  // Lower temperature in JSON mode so 2B/4B local models produce valid JSON reliably
+  const temperature = jsonContract
+    ? Math.min(settings.temperature, 0.3)
+    : settings.temperature;
+
+  const result = await generateWithOnDeviceLLM(
+    {
+      modelId: settings.model.trim(),
+      systemInstruction,
+      prompt: fullPrompt,
+      temperature,
+      maxTokens: jsonContract ? 1800 : 2400,
+      jsonMode: Boolean(jsonContract),
+    },
+    signal
+  );
+
+  if (!result.text?.trim()) {
+    throw new AIServiceError('On-Device AI ไม่ได้ส่งข้อความกลับมา กรุณาลองใหม่อีกครั้ง', 'VALIDATION');
+  }
+  return result.text.trim();
+}
+
 async function generateStructuredJson<T>(params: {
   apiKey: string;
   settings: AISettings;
@@ -333,7 +420,8 @@ async function generateStructuredJson<T>(params: {
   const { apiKey, settings, prompt, schema, jsonContract, validator, signal, onRetry } = params;
   validateConfig(apiKey, settings);
 
-  const maxRetries = 3;
+  // Never auto-retry on-device models (prevents 4x slowness and phone overheating)
+  const maxRetries = settings.provider === 'on-device' ? 0 : 3;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (signal?.aborted) {
@@ -342,7 +430,15 @@ async function generateStructuredJson<T>(params: {
 
     try {
       let rawText: string;
-      if (settings.provider === 'gemini') {
+      if (settings.provider === 'on-device') {
+        rawText = await callOnDeviceProvider({
+          settings,
+          systemInstruction: BASE_SYSTEM_INSTRUCTION,
+          prompt,
+          jsonContract,
+          signal,
+        });
+      } else if (settings.provider === 'gemini') {
         rawText = await callGeminiProvider({ apiKey, settings, prompt, schema, signal });
       } else if (settings.provider === 'anthropic') {
         rawText = await callAnthropicProvider({ apiKey, settings, prompt, jsonContract, signal });
@@ -396,6 +492,22 @@ export async function testAIConnection(
 ): Promise<{ ok: boolean; message: string }> {
   try {
     validateConfig(apiKey, settings);
+
+    if (settings.provider === 'on-device') {
+      const filename = settings.model.trim();
+      const loadRes = await loadOnDeviceModel(filename, 'gpu', 4096);
+      const genRes = await generateWithOnDeviceLLM({
+        modelId: filename,
+        systemInstruction: 'Reply concisely.',
+        prompt: 'ตอบคำว่า OK สั้นๆ คำเดียว',
+        maxTokens: 16,
+        temperature: 0.1,
+      });
+      return {
+        ok: true,
+        message: `พร้อมใช้งาน ${filename} บน ${loadRes.backendUsed.toUpperCase()} (โหลด ${(loadRes.loadTimeMs / 1000).toFixed(1)} วิ • ${genRes.tokensPerSec.toFixed(1)} tok/s)`,
+      };
+    }
 
     if (settings.provider === 'gemini') {
       const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
@@ -471,6 +583,11 @@ export async function fetchAvailableModels(
   apiKey: string,
   settings: AISettings
 ): Promise<string[]> {
+  if (settings.provider === 'on-device') {
+    const installed = await scanInstalledOnDeviceModels();
+    return installed.map((m) => m.filename);
+  }
+
   if (settings.provider === 'gemini') {
     if (!apiKey.trim()) throw new AIServiceError('กรุณากรอก Gemini API Key ก่อนดึงรายชื่อโมเดล', 'AUTH');
     const res = await fetch(
@@ -1098,13 +1215,22 @@ async function generateRawText(params: {
   const { apiKey, settings, systemInstruction, prompt, signal, onRetry } = params;
   validateConfig(apiKey, settings);
 
-  const maxRetries = 3;
+  const maxRetries = settings.provider === 'on-device' ? 0 : 3;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (signal?.aborted) {
       throw new AIServiceError('ยกเลิกการทำงานแล้ว', 'ABORTED');
     }
 
     try {
+      if (settings.provider === 'on-device') {
+        return await callOnDeviceProvider({
+          settings,
+          systemInstruction,
+          prompt,
+          signal,
+        });
+      }
+
       if (settings.provider === 'gemini') {
         const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
         const response = await ai.models.generateContent({

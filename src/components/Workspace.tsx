@@ -21,7 +21,6 @@ import { estimateProjectContextTokens } from '../utils/tokenEstimator';
 import {
   exportAsJson,
   exportAsMarkdown,
-  exportAsPlainText,
   exportManuscriptAsMarkdown,
   exportManuscriptAsText,
 } from '../utils/exporter';
@@ -250,22 +249,8 @@ export function Workspace() {
                   >
                     <FileText className="w-4 h-4 text-indigo-600" />
                     <div>
-                      <p className="font-semibold">Markdown (.md)</p>
-                      <p className="text-[10px] text-stone-400">พร้อมเปิดใน Obsidian / Notion</p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      exportAsPlainText(activeProject);
-                      setExportOpen(false);
-                    }}
-                    className="w-full px-3.5 py-2 text-left text-xs font-medium text-stone-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2.5"
-                  >
-                    <FileText className="w-4 h-4 text-stone-500" />
-                    <div>
-                      <p className="font-semibold">Plain Text (.txt)</p>
-                      <p className="text-[10px] text-stone-400">อ่านง่ายบนมือถือและส่งต่อ</p>
+                      <p className="font-semibold">โครงเรื่อง Markdown (.md)</p>
+                      <p className="text-[10px] text-stone-400">ส่งให้ AI ภายนอกแต่งต่อ / เปิดใน Obsidian</p>
                     </div>
                   </button>
                   <button

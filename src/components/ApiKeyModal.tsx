@@ -17,6 +17,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { AI_PROVIDER_PRESETS, getPresetById } from '../data/aiProviders';
 import { fetchAvailableModels, testAIConnection } from '../services/geminiService';
+import { OnDeviceModelManager } from './OnDeviceModelManager';
 import type { AISettings } from '../types/novel';
 
 export function ApiKeyModal() {
@@ -36,7 +37,6 @@ export function ApiKeyModal() {
   const [model, setModel] = useState(aiSettings.model);
   const [fastModel, setFastModel] = useState(aiSettings.fastModel ?? '');
   const [temperature, setTemperature] = useState(aiSettings.temperature);
-  const [useCorsProxy, setUseCorsProxy] = useState(Boolean(aiSettings.useCorsProxy));
   const [economyMode, setEconomyMode] = useState(Boolean(aiSettings.economyMode));
   const [draftKey, setDraftKey] = useState(apiKeysMap[aiSettings.presetId] ?? '');
   const [showKey, setShowKey] = useState(false);
@@ -56,7 +56,6 @@ export function ApiKeyModal() {
       setModel(aiSettings.model);
       setFastModel(aiSettings.fastModel ?? '');
       setTemperature(aiSettings.temperature);
-      setUseCorsProxy(Boolean(aiSettings.useCorsProxy));
       setEconomyMode(Boolean(aiSettings.economyMode));
       setDraftKey(apiKeysMap[aiSettings.presetId] ?? '');
       setFetchedModels([]);
@@ -71,7 +70,6 @@ export function ApiKeyModal() {
     setPresetId(preset.id);
     setBaseUrl(preset.baseUrl);
     setModel(preset.defaultModel);
-    setUseCorsProxy(preset.id === 'custom');
     setDraftKey(apiKeysMap[preset.id] ?? '');
     setFetchedModels([]);
     setTestResult(null);
@@ -82,9 +80,9 @@ export function ApiKeyModal() {
     presetId: activePreset.id,
     baseUrl: baseUrl.trim(),
     model: model.trim(),
-    fastModel: fastModel.trim(),
+    fastModel: activePreset.provider === 'on-device' ? '' : fastModel.trim(),
     temperature,
-    useCorsProxy: activePreset.provider !== 'gemini' ? useCorsProxy : false,
+    useCorsProxy: false,
     economyMode,
   });
 
@@ -166,7 +164,7 @@ export function ApiKeyModal() {
             <div>
               <h2 className="text-base font-bold text-stone-900">ตั้งค่า AI Provider & โมเดล</h2>
               <p className="text-xs text-stone-500">
-                รองรับทุกค่าย: OpenRouter, Gemini, OpenAI, Claude, DeepSeek, Groq, Typhoon, Ollama หรือ Custom API
+                เลือกใช้งาน On-Device NPU (Gemma 4 ออฟไลน์) หรือเชื่อมต่อ Cloud API (OpenRouter / Gemini / Custom)
               </p>
             </div>
           </div>
@@ -224,42 +222,29 @@ export function ApiKeyModal() {
             <p className="text-xs text-stone-500 mt-2">{activePreset.description}</p>
           </div>
 
-          {/* Base URL (for non-Gemini) */}
-          {activePreset.provider !== 'gemini' && (
-            <div className="space-y-2">
-              <div>
-                <label className="block text-xs font-bold text-stone-700 mb-1">
-                  API Base URL
-                </label>
-                <input
-                  type="text"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="https://api.openai.com/v1"
-                  className="w-full rounded-xl border border-stone-300 px-3.5 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
+          {/* On-Device Model Manager (Gemma 4 E4B NPU) */}
+          {activePreset.provider === 'on-device' && (
+            <OnDeviceModelManager selectedModelId={model} onSelectModel={setModel} />
+          )}
 
-              <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-stone-50 border border-stone-200 cursor-pointer hover:bg-stone-100/70 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={useCorsProxy}
-                  onChange={(e) => setUseCorsProxy(e.target.checked)}
-                  className="mt-0.5 accent-indigo-600 rounded"
-                />
-                <div className="text-xs">
-                  <span className="font-semibold text-stone-800 block">
-                    เปิดใช้ Local CORS Proxy (/api/cors-proxy)
-                  </span>
-                  <span className="text-stone-500 text-[11px]">
-                    แก้ปัญหาติด CORS สำหรับ Custom OpenAI API โดยส่งคำขอผ่านเซิร์ฟเวอร์ในเครื่องของคุณแทนเบราว์เซอร์โดยตรง
-                  </span>
-                </div>
+          {/* Base URL (for non-Gemini & non-On-Device) */}
+          {activePreset.provider !== 'gemini' && activePreset.provider !== 'on-device' && (
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1">
+                API Base URL
               </label>
+              <input
+                type="text"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="https://api.openai.com/v1"
+                className="w-full rounded-xl border border-stone-300 px-3.5 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
           )}
 
-          {/* API Key Input */}
+          {/* API Key Input (hidden for On-Device NPU) */}
+          {activePreset.provider !== 'on-device' && (
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-bold text-stone-700 inline-flex items-center gap-1.5">
@@ -308,6 +293,7 @@ export function ApiKeyModal() {
               </div>
             </div>
           </div>
+          )}
 
           {/* Model ID Input + Fetch Models */}
           <div>
@@ -368,22 +354,24 @@ export function ApiKeyModal() {
 
           {/* Dual-Model Routing & Economy Mode */}
           <div className="rounded-xl bg-emerald-50/60 border border-emerald-200/80 p-3.5 space-y-3">
-            <div>
-              <label className="block text-xs font-bold text-emerald-950 mb-1">
-                โมเดลประหยัดสำหรับงานเบา (Fast Model — ไม่บังคับ)
-              </label>
-              <input
-                type="text"
-                list="ai-model-options"
-                value={fastModel}
-                onChange={(e) => setFastModel(e.target.value)}
-                placeholder="เช่น gpt-4o-mini, gemini-2.0-flash, deepseek-chat (เว้นว่างเพื่อใช้โมเดลหลัก)"
-                className="w-full rounded-xl border border-emerald-300/80 bg-white px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-              <p className="text-[11px] text-emerald-800/80 mt-1">
-                ใช้กับงานเบา (Auto-Director, Logline, เพิ่ม Lore/ตัวละคร, บีบอัดสรุป) เพื่อประหยัดค่า API 50–70%
-              </p>
-            </div>
+            {activePreset.provider !== 'on-device' && (
+              <div>
+                <label className="block text-xs font-bold text-emerald-950 mb-1">
+                  โมเดลประหยัดสำหรับงานเบา (Fast Model — ไม่บังคับ)
+                </label>
+                <input
+                  type="text"
+                  list="ai-model-options"
+                  value={fastModel}
+                  onChange={(e) => setFastModel(e.target.value)}
+                  placeholder="เช่น gpt-4o-mini, gemini-2.5-flash (เว้นว่างเพื่อใช้โมเดลหลัก)"
+                  className="w-full rounded-xl border border-emerald-300/80 bg-white px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <p className="text-[11px] text-emerald-800/80 mt-1">
+                  ใช้กับงานเบา (Auto-Director, Logline, เพิ่ม Lore/ตัวละคร, บีบอัดสรุป) เพื่อประหยัดค่า API 50–70%
+                </p>
+              </div>
+            )}
 
             <label className="flex items-start gap-2 cursor-pointer">
               <input

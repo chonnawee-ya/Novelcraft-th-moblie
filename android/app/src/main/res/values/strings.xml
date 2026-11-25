@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PlotCraft TH</string>
+    <string name="title_activity_main">PlotCraft TH</string>
+    <string name="package_name">th.plotcraft.novelstudio</string>
+    <string name="custom_url_scheme">th.plotcraft.novelstudio</string>
+</resources>
